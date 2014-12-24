@@ -1,33 +1,13 @@
-/* ====== ESP8266 experiments ======
- *
- * (Updated Dec 21, 2014)
- *
- * based on Ray Wang's sketch
- * =================================
- *
- * Change SSID and PASS to match your WiFi settings.
- * The IP address is displayed to soft serial upon successful connection.
- *
- * Ray Wang @ Rayshobby LLC
- * http://rayshobby.net/?p=9734
- *
- * 
- * tested on mega2560
- * serial monitor nl/57600
- * esp firmware 0018000902-AI03 - [Vendor:www.ai-thinker.com Version:0.9.2.4]  (my esp came standard like this)
- * connected with http://192.168.1.102:8080
- */
-
 #include "string.h"
 #include "arduino.h"
 #include "printfthingie.h"
 
-#define ESPBUF_SIZE 512
+#define ESPBUF_SIZE 512  // can probably be a lot smaller
 #define SERBUF_SIZE 80
 
-#define SSID  "syslink"      // change this to match your WiFi SSID
+#define SSID  "syslink"           // change this to match your WiFi SSID
 #define PASS  "hpm68ftevc8y7bws"  // change this to match your WiFi password
-#define PORT  "8080"           // using port 8080 by default
+#define PORT  "8080"              // using port 8080 by default
 
 char espbuf[ESPBUF_SIZE];
 char serbuf[SERBUF_SIZE];
@@ -44,7 +24,8 @@ long esp_rst_num=0;
 byte serverup=0;
 byte serverreq=0;
 long serverreq_num=0;
-int ch_id;
+int server_ch_id;
+char servertarget;
 
 /*
 // If using Software Serial for debug
@@ -68,8 +49,6 @@ void ser_listen ()
     c = ser.read ();
     switch (c)
     {
-//      case ' ':
-//      case '\t':
       case '\n':   // end of text
         serbuf [serPos] = 0;  // terminating byte
         ser_handle (serbuf);
@@ -79,7 +58,7 @@ void ser_listen ()
         if (serPos < (SERBUF_SIZE - 1))
           serbuf [serPos++] = c;
         else
-          ; //error(6001);  // character ignored, did not fit in the buffer
+          ; //error - character ignored, did not fit in the buffer
       break;
     }  // switch
   }
@@ -95,7 +74,7 @@ void esp_listen ()
     if (espPos < (ESPBUF_SIZE - 2))
     {
       espbuf [espPos++] = c;
-      esp_show_char (c);
+      esp_show_char (c);        // show character on serial
       if ( (c == '\n') || ((c == ' ') && (espbuf[0] == '>') && (espPos == 2)) )    // \n OR > followed by space at the beginning of a line closes the espbuf
       {
         espbuf [espPos] = 0;  // terminating byte AFTER the closing character
@@ -107,9 +86,6 @@ void esp_listen ()
   }
 }
 
-// _ is the prefix to run certain commands
-// AT commands are (almost) always closed with \r\n (for older version, this is \n)
-// - prefix = some commands are closed with \n
 void ser_handle (const char * data)
 {
     ser.print ("ser:");
@@ -121,7 +97,7 @@ void ser_handle (const char * data)
 
       case '_':  // prefix to run commands
         if ( (data[1] == 0) || (strcmp (&data[1], "stats") == 0) )      // _ or _stats gives some stats
-          stats ();
+          ser_stats ();
         if (strcmp (&data[1], "version") == 0)                          // example of a shortcut - version of the esp firmware
           esp.print ("AT+GMR\r\n");
         if (strcmp (&data[1], "connect") == 0)                          // example of a shortcut - connect to a wifi network with encryption
@@ -136,7 +112,10 @@ void ser_handle (const char * data)
         if (strcmp (&data[1], "server") == 0)
           server_start ();
         if (strcmp (&data[1], "stop") == 0)
+        {
           serverup=0;
+          digitalWrite (13, LOW);
+        }
 
       break;
 
@@ -164,7 +143,7 @@ void esp_show_char (const char data)
 {
   switch (data)
   {
-    case '\0':  // closing byte of a string - can never be displayed in this context!!!
+    case '\0':  // closing byte of a string - will never be displayed in this context!!!
       ser.print ("\\0");
     break;
     case '\a':  // 7 bel
@@ -201,7 +180,7 @@ void esp_handle ()
 
   if ( strstr(espbuf, "[Vendor:www.ai-thinker.com Version:0.9.2.4]\r\n") )  // for some reason the esp restarted
     esp_rst=1;
-  if (strncmp (espbuf, "ready\r\n", 7)==0 && esp_rst==1)                    // restart complete
+  if ( (strncmp (espbuf, "ready\r\n", 7)==0 || (strncmp (espbuf, "Ready\r\n", 7)==0))  && esp_rst==1)                    // restart complete
   {
     ser.println ("**************************************************************************************");
     ser.println ("**************************************************************************************");
@@ -211,11 +190,12 @@ void esp_handle ()
 
     if (serverup)                   // the server was running
     {
-      esp_rst_num++;  // we count how many restarts and server_restarts we detected
-      stats ();       // for serial monitoring
+      esp_rst_num++;                // we count how many restarts and server_restarts we detected
+      ser_stats ();                 // for serial monitoring
       serverup=0;
+      digitalWrite (13, LOW);
       serverreq=0;
-      server_start ();              // restart it
+      server_start ();              // restart the server
     }
     esp_rst=0;
   }
@@ -227,9 +207,11 @@ void esp_handle ()
 void setup ()
 {
   printf_begin();
-  esp.begin(9600);
+  esp.begin(9600);  // older firmware has different baud rate
   ser.begin(57600);
-  ser.println ("Hello world - esp8266_experiments");
+  ser.println ("esp8266_experiments - auto starting the server");
+  pinMode (13, OUTPUT);
+  server_start ();
 }
 
 void loop ()
@@ -240,7 +222,15 @@ void loop ()
     esp_handle ();
   if ( serverup && (serverreq==3) )
   {
-    serve_stats (ch_id);
+    switch (servertarget)
+    {
+      case '1': serve_homepage_ray (server_ch_id); break;
+      case '2': serve_homepage_nanode (server_ch_id); break;
+      case '3': serve_homepage_ian (server_ch_id); break;
+      case '4': serve_homepage_notavail (server_ch_id); break;
+      case ' ':
+      default : serve_homepage_stats (server_ch_id); break;
+    }
     serverreq=0;
   }
 }

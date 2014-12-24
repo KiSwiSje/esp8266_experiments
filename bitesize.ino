@@ -14,18 +14,18 @@ byte waitforit (long timeout)
     esp_listen ();
     if (esp_msg)
     {
-      esp_handle ();            // show esp messages - also handle esp restart
+      esp_handle ();                                   // handles esp restart if necessary
       if ( strncmp(espbuf, "OK\r\n",4)==0 )
         found=1;
       else
         if ( strncmp(espbuf, "no change\r\n",11)==0 )  // AT+CWMODE=# can return this
           found=1;
         else
-          if ( strncmp (espbuf, "> ",2)==0 )
+          if ( strncmp (espbuf, "> ",2)==0 )          // cipsend returns this - asking input
             found=1;
           else
             if ( strncmp(espbuf, "ERROR\r\n",7)==0 )
-              t -= timeout;  // to force exiting the while loop
+              t -= timeout;                            // to force exiting the while loop
     }
   }
   return (found);
@@ -38,15 +38,10 @@ byte espup ()
 
   esp.print ("AT\r\n");
   found = waitforit (5000L);
-
-//  if (found)
-//    ser.println ("esp is up and responsive ");
-//  else
-//    ser.println ("******* error - esp is not responsive ********");
   return (found);
 }
 
-// this needs further testing!!! esp_show works ... esp_handle might go apeshit
+// this needs further testing!!! some weirdness, but works
 byte esp_reset ()
 {
   byte found=0;
@@ -70,11 +65,19 @@ byte esp_reset ()
   return (found==2);
 }
 
-void stats ()
+// show some statistics on the serial port
+void ser_stats ()
 {
   ser.println ("statistics:");
   ser.print ("# restarts detected:"); ser.println (esp_rst_num);
   ser.print ("server running:"); ser.println (serverup);
   ser.print ("server requests received:");  ser.println (serverreq_num);
-
 }
+
+
+// http://www.gammon.com.au/forum/?id=12615
+int freeRam ()
+{
+  return (RAMEND - size_t (__malloc_heap_start));
+}
+
