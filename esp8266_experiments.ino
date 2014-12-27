@@ -1,8 +1,11 @@
 #include "string.h"
 #include "arduino.h"
 #include "printfthingie.h"
+#include <avr/pgmspace.h>
 
-#define ESPBUF_SIZE 512  // can probably be a lot smaller
+const byte led=13;
+
+#define ESPBUF_SIZE 256  // can probably be a smaller
 #define SERBUF_SIZE 80
 
 #define SSID  "syslink"           // change this to match your WiFi SSID
@@ -18,12 +21,14 @@ int serPos=0;
 byte esp_msg=0;
 
 byte esp_rst=0;
-long esp_rst_num=0;
+long esp_restart_num=0;
 
 // for the server example
-byte serverup=0;
+byte serverup=0; // 2: debug mode, will not restart, will not respond 1: server will respond; 0: server will be restarted automatically
 byte serverreq=0;
 long serverreq_num=0;
+long server_startok_num=0;
+long server_startnok_num=0;
 int server_ch_id;
 char servertarget;
 
@@ -64,57 +69,69 @@ void ser_listen ()
   }
 }
 
-// adds characters to the espbuf, shows character for character on serial
+// adds characters to the espbuf, echo character on serial
 void esp_listen ()
 {
   if (esp.available () > 0)
   {
     char c = esp.read ();
-
-    if (espPos < (ESPBUF_SIZE - 2))
-    {
-      espbuf [espPos++] = c;
-      esp_show_char (c);        // show character on serial
-      if ( (c == '\n') || ((c == ' ') && (espbuf[0] == '>') && (espPos == 2)) )    // \n OR > followed by space at the beginning of a line closes the espbuf
-      {
-        espbuf [espPos] = 0;  // terminating byte AFTER the closing character
-        esp_msg=1;            // we have a message from the esp
-      }
+    esp_show_char (c);        // echo character on serial IMMEDIATELY
+    espbuf [espPos++] = c;
+    if ( (espPos >= (ESPBUF_SIZE-1)) || (c == '\n') || ((c == ' ') && (espbuf[0] == '>') && (espPos == 2)) )
+    {  // \n OR > followed by space at the beginning of a line closes the espbuf - or buffer full
+      espbuf [espPos] = 0;  // terminating byte AFTER the closing character
+      esp_msg=1;            // we have a message from the esp
     }
-    else
-      ser.println ("******* error character ignored, did not fit in the buffer ********");
   }
 }
 
 void ser_handle (const char * data)
 {
-    ser.print ("ser:");
-    ser.println (serbuf);  // echo command
+ser.print (F("ser:"));
+ser.println (serbuf);  // echo command
 
     switch (data[0])
     {
       int i;
+      unsigned long baud;
 
       case '_':  // prefix to run commands
         if ( (data[1] == 0) || (strcmp (&data[1], "stats") == 0) )      // _ or _stats gives some stats
           ser_stats ();
         if (strcmp (&data[1], "version") == 0)                          // example of a shortcut - version of the esp firmware
-          esp.print ("AT+GMR\r\n");
+          esp.print (F("AT+GMR\r\n"));
         if (strcmp (&data[1], "connect") == 0)                          // example of a shortcut - connect to a wifi network with encryption
-          esp.print ("AT+CWJAP=\"syslink\",\"hpm68ftevc8y7bws\"\r\n");  // this does not check the reply for success
+          esp.print (F("AT+CWJAP=\"syslink\",\"hpm68ftevc8y7bws\"\r\n"));  // this does not check the reply for success
         if (strcmp (&data[1], "espup") == 0)
           if (espup ())
-            ser.println ("esp8266 responsive");
+            ser.println (F("esp8266 responsive"));
           else
-            ser.println ("esp8266 not responsive");
+            ser.println (F("esp8266 not responsive"));
         if (strcmp (&data[1], "reset") == 0)
           esp_reset ();
+        if (strncmp (&data[1], "baud",4) == 0)
+        {
+          sscanf(&data[5], "%lu", &baud);
+          ser.print (F("baud:")); ser.println (baud);
+          esp.end ();
+          esp.begin (baud);
+        }
         if (strcmp (&data[1], "server") == 0)
           server_start ();
-        if (strcmp (&data[1], "stop") == 0)
+        if (strcmp (&data[1], "stop") == 0)          // for testing purposes
         {
-          serverup=0;
-          digitalWrite (13, LOW);
+          if (serverup==1)
+          {
+            serverup=2;                            // we stop responding to server requests
+            digitalWrite (led, LOW);
+          }
+          else
+          {
+            serverup=1;
+            digitalWrite (led, HIGH);
+          }
+          
+          ser.print (F("serverup:")); ser.println (serverup);
         }
 
       break;
@@ -122,15 +139,20 @@ void ser_handle (const char * data)
       case 'A':  // we assume this is an AT command - so we pass it to the esp8266
         for (i=0; i<strlen(data); i++)
           esp.print (data[i]);
-        esp.print ("\r\n");          // older versions of the firmware only want \n
+        esp.print ("\r\n");          // send \r\n ; older versions of the firmware only want \n
       break;
-      case '-':  // we assume this is an AT command - so we pass it to the esp8266
+      case '-':
         for (i=1; i<strlen(data); i++)
           esp.print (data[i]);
         esp.print ("\n");          // only send \n
       break;
+      case '+':
+        for (i=1; i<strlen(data); i++)
+          esp.print (data[i]);
+        esp.print ("\r\n");          // send \r\n
+      break;
 
-      default:  // we assume this is a text command
+      default:  // we assume this is a text command (in response to the > prompt)
         for (i=0; i<strlen(data); i++)
           esp.print (data[i]);
         esp.print ("\n");          // only \n
@@ -175,30 +197,22 @@ void esp_show_char (const char data)
 
 void esp_handle ()
 {
-  if (serverup)
-    server_handle ();
-
-  if ( strstr(espbuf, "[Vendor:www.ai-thinker.com Version:0.9.2.4]\r\n") )  // for some reason the esp restarted
+  if ( strstr(espbuf, "ai-thinker.com Version:0.9.2.4") )  // for some reason the esp restarted
     esp_rst=1;
   if ( (strncmp (espbuf, "ready\r\n", 7)==0 || (strncmp (espbuf, "Ready\r\n", 7)==0))  && esp_rst==1)                    // restart complete
   {
-    ser.println ("**************************************************************************************");
-    ser.println ("**************************************************************************************");
-    ser.println ("****************************** esp restarted *****************************************");
-    ser.println ("**************************************************************************************");
-    ser.println ("**************************************************************************************");
+    ser.println (F("**************************************************************************************"));
+    ser.println (F("**************************************************************************************"));
+    ser.println (F("****************************** esp restarted *****************************************"));
+    ser.println (F("**************************************************************************************"));
+    ser.println (F("**************************************************************************************"));
 
-    if (serverup)                   // the server was running
-    {
-      esp_rst_num++;                // we count how many restarts and server_restarts we detected
-      ser_stats ();                 // for serial monitoring
-      serverup=0;
-      digitalWrite (13, LOW);
-      serverreq=0;
-      server_start ();              // restart the server
-    }
+    esp_restart_num++;
+    ser_stats ();
+
     esp_rst=0;
-  }
+    server_down ();  // server is down
+   }
 
   espPos = 0;
   esp_msg=0;
@@ -207,11 +221,12 @@ void esp_handle ()
 void setup ()
 {
   printf_begin();
-  esp.begin(9600);  // older firmware has different baud rate
+
+  esp.begin(57600);  // older firmware has different baud rate
   ser.begin(57600);
-  ser.println ("esp8266_experiments - auto starting the server");
-  pinMode (13, OUTPUT);
-  server_start ();
+  ser.println (F("esp8266_experiments - auto starting the server"));
+
+  server_down ();
 }
 
 void loop ()
@@ -219,19 +234,15 @@ void loop ()
   ser_listen ();
   esp_listen ();
   if (esp_msg)
-    esp_handle ();
-  if ( serverup && (serverreq==3) )
   {
-    switch (servertarget)
-    {
-      case '1': serve_homepage_ray (server_ch_id); break;
-      case '2': serve_homepage_nanode (server_ch_id); break;
-      case '3': serve_homepage_ian (server_ch_id); break;
-      case '4': serve_homepage_notavail (server_ch_id); break;
-      case ' ':
-      default : serve_homepage_stats (server_ch_id); break;
-    }
-    serverreq=0;
+    server_handle (); // scan the incoming messages
+    esp_handle ();    // checks if the esp restarted - resets esp_msg to 0
+  }
+  server_loop ();     // handle webpage requests
+  if (serverup==0)      // server not running?
+  {
+    delay(1000);
+    server_start ();  // restart the server
   }
 }
 

@@ -26,6 +26,9 @@ byte waitforit (long timeout)
           else
             if ( strncmp(espbuf, "ERROR\r\n",7)==0 )
               t -= timeout;                            // to force exiting the while loop
+            else
+              if ( strncmp(espbuf, "FAIL\r\n",6)==0 )
+                t -= timeout;                            // to force exiting the while loop
     }
   }
   return (found);
@@ -36,7 +39,7 @@ byte espup ()
 {
   byte found;
 
-  esp.print ("AT\r\n");
+  esp.print (F("AT\r\n"));
   found = waitforit (5000L);
   return (found);
 }
@@ -46,7 +49,7 @@ byte esp_reset ()
 {
   byte found=0;
 
-  esp.print("AT+RST\r\n");
+  esp.print(F("AT+RST\r\n"));
   unsigned long t = millis () + 10000;
 
   while ( ( (long)(millis () - t) < 0) && found != 2)
@@ -68,16 +71,46 @@ byte esp_reset ()
 // show some statistics on the serial port
 void ser_stats ()
 {
-  ser.println ("statistics:");
-  ser.print ("# restarts detected:"); ser.println (esp_rst_num);
-  ser.print ("server running:"); ser.println (serverup);
-  ser.print ("server requests received:");  ser.println (serverreq_num);
+  char buf[20];
+
+  ser.println (F("statistics:"));
+  ser.print (F("esp starts:")); ser.println (esp_restart_num);
+  ser.print (F("server running:")); ser.println (serverup);
+  ser.print (F("server requests received:"));  ser.println (serverreq_num);
+  ser.print (F("server start ok:"));  ser.println (server_startok_num);
+  ser.print (F("server start nok:"));  ser.println (server_startnok_num);
+  ser.print (F("Uptime(s):"));  ser.println (readabletime_string(millis (),buf));
 }
 
+char* readabletime_string (unsigned long time, char *buf)
+{
+  long temp=time;
+  byte bufindex=0;
+
+  if (temp >= (24*3600000L))
+  {
+    sprintf (&buf[bufindex], "%dd", temp / (24*3600000L));
+    bufindex += strlen (buf);
+    temp %= (24*3600000L);
+  }
+
+  if (temp >= 3600000L)
+  {
+    sprintf (&buf[bufindex], "%02dh", temp / 3600000L);
+    bufindex += 3;
+    temp %= 3600000L;
+  }
+  sprintf (&buf[bufindex], "%02dm", temp / 60000L);
+  temp %= 60000L;
+  bufindex += 3;
+  sprintf (&buf[bufindex], "%02ds", temp / 1000L);
+  return (buf);
+}
 
 // http://www.gammon.com.au/forum/?id=12615
 int freeRam ()
 {
   return (RAMEND - size_t (__malloc_heap_start));
 }
+
 

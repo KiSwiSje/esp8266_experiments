@@ -35,16 +35,28 @@ atmega328p with software serial: untested
 
 to do:
 *******
+some features in my firmware:
+http://www.electrodragon.com/w/Wi07c#Firmware
+AT+CIOBAUD=?       // inquiry
+AT+CIOBAUD?        // check
+AT+CIOBAUD=57600   //Set was succesful first time - lets see if it can handle multiple connection now
+AT+CSYSWDTDISABLE  // don't see change - more testing needed
+AT+CSYSWDTENABLE
 
+build new webpage_stats
+build webpage_b
+test on 328p
+
+log power outage periods?
+dyndns
+open port on router
 some buttons, and how to check they were pressed
-show picturemap with clickable part(s)
-move strings to progmem - freeram 3609 out of 8kbyte - this will not work on a 328p
-  tip - comment out some of the homepages to work around this
+
 
 
 
 sources:
-Nick Gammon's site is a source of information, in this example, methods for reading serial streams inspired me
+Nick Gammon's site is a source of information, in this example, methods for reading serial streams inspired me, also, freeram
 http://www.gammon.com.au/serial
 
 Ray Wang @ Rayshobby LLC
@@ -57,7 +69,6 @@ Ian Sexton
 http://www.cse.dmu.ac.uk/~sexton/ESP8266/
 
 find string in a string - needle in the haystack - strstr ()
-
 http://www.tutorialspoint.com/c_standard_library/c_function_strstr.htm
 eg.
    char haystack[20] = "TutorialsQoint234";

@@ -26,9 +26,17 @@ int serial_putc( char c, FILE * )
   return c;
 }
 
+int serial1_putc( char c, FILE * )
+{
+  Serial1.write( c );
+
+  return c;
+}
+
 void printf_begin(void)
 {
   fdevopen( &serial_putc, 0 );
+  fdevopen( &serial1_putc, 0 );
 }
 
 #elif defined (__arm__)
