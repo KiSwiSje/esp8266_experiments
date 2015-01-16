@@ -2,6 +2,11 @@ esp8266_experiments
 ===================
 
 esp8266 wifi module - and some simple ways to talk to it
+note: this device is far from reliable - expect frequent restarts - even hanging connections - handling these automatically is a bit of a challenge
+
+I must admit - i had a bit of a struggle - i somehow lost reliability of the server (esp8266 restarts a lot!)
+but i think i managed to solve some problems
+the code is a huge mess, though - will try and clean it up
 
 there seem to be many different versions of the firmware around, and each reacts differently to the commands sent to it
 
@@ -12,7 +17,7 @@ the output from the esp8266 is shown back in the serial monitor, but for added c
 this allows to study what sort of responses you can get after a command - and how to deal with it in your code
 
 i have also incorporated a way to check if the esp8266 restarts - and if need be, restart your server that was running.
-this may not work on all versions of the firmware - i think later versions have a watchdog timer that detects a hang-up and restarts the esp8266 (confirmed - can be enabled/disabled)
+this may not work on all versions of the firmware - i think later versions have a watchdog timer that detects a hang-up and restarts the esp8266 (confirmed - can be enabled/disabled - does not seem to change the frequent restarts though - will investigate further)
 
 I adapted a simple webserver example, I included a couple of simple web pages for testing purposes.
 (sources can be found in the code)
@@ -24,6 +29,12 @@ level shifter CD4050 to protect the esp8266
 update: my sketch handles restarts from the esp8266 well, so far i did not have to reset it. The browser may not load, or stop loading the auto-refreshing page though.
 I did notice that with a baudrate of 9600 the esp8266 restarts a lot when i try and connect from 2 browsers. (was very stable as long as only one browser connected) you can actually change this baudrate with AT+CIOBAUD=57600. this seems to help a lot.
 I am doing some more testing - I will update
+
+
+
+
+
+
 
 
 

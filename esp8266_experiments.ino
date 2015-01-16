@@ -10,7 +10,7 @@ const byte led=13;
 
 #define SSID  "syslink"           // change this to match your WiFi SSID
 #define PASS  "hpm68ftevc8y7bws"  // change this to match your WiFi password
-#define PORT  "8080"              // using port 8080 by default
+int ip=0;
 
 char espbuf[ESPBUF_SIZE];
 char serbuf[SERBUF_SIZE];
@@ -29,8 +29,27 @@ byte serverreq=0;
 long serverreq_num=0;
 long server_startok_num=0;
 long server_startnok_num=0;
+long server_unresponsive_num=0;
 int server_ch_id;
+int server_ch_id_max=-1;
 char servertarget;
+int chunksize=256;
+
+byte requester;
+enum requesters
+{
+  unknown     =0,
+  iphone      =1,
+  mac         =2
+};
+
+
+unsigned long last_connection=0;
+unsigned long last_esp_restart=0;
+unsigned long heartbeat=0;
+const unsigned long heartbeatinterval=5*60*1000L;  // 5 minutes
+unsigned long tictoc;
+
 
 /*
 // If using Software Serial for debug
@@ -98,7 +117,7 @@ ser.println (serbuf);  // echo command
       case '_':  // prefix to run commands
         if ( (data[1] == 0) || (strcmp (&data[1], "stats") == 0) )      // _ or _stats gives some stats
           ser_stats ();
-        if (strcmp (&data[1], "version") == 0)                          // example of a shortcut - version of the esp firmware
+        if (strcmp (&data[1], "version") == 0)                          // example of a shortcut - show version of the esp firmware
           esp.print (F("AT+GMR\r\n"));
         if (strcmp (&data[1], "connect") == 0)                          // example of a shortcut - connect to a wifi network with encryption
           esp.print (F("AT+CWJAP=\"syslink\",\"hpm68ftevc8y7bws\"\r\n"));  // this does not check the reply for success
@@ -116,9 +135,22 @@ ser.println (serbuf);  // echo command
           esp.end ();
           esp.begin (baud);
         }
-        if (strcmp (&data[1], "server") == 0)
-          server_start ();
+        if (strncmp (&data[1], "chunksize",9) == 0)
+        {
+          sscanf(&data[10], "%u", &chunksize);
+          ser.print (F("chunksize:")); ser.println (chunksize);
+        }
+        if (strcmp (&data[1], "start") == 0)
+        {
+          server_down ();                            // this will invoke the auto-start
+          heartbeat = millis ();                     // no wait time
+        }
         if (strcmp (&data[1], "stop") == 0)          // for testing purposes
+        {
+          server_down ();
+          serverup=2;                                // don't restart automatically
+        }
+        if (strcmp (&data[1], "pause") == 0)          // pause server responding / do not auto-restart
         {
           if (serverup==1)
           {
@@ -132,6 +164,12 @@ ser.println (serbuf);  // echo command
           }
           
           ser.print (F("serverup:")); ser.println (serverup);
+        }
+        if (strncmp (&data[1], "test", 4) == 0)  // _test'server' 'page' - vb _testmacfan.nl /
+        {
+          char str[40], str2[40];
+          sscanf (&data[5],"%s %s", str,str2);
+          connection_test (str,str2);
         }
 
       break;
@@ -155,7 +193,7 @@ ser.println (serbuf);  // echo command
       default:  // we assume this is a text command (in response to the > prompt)
         for (i=0; i<strlen(data); i++)
           esp.print (data[i]);
-        esp.print ("\n");          // only \n
+        //esp.print ("\n");          // only \n
       break;
     }
 }  // end of ser_handle
@@ -165,7 +203,7 @@ void esp_show_char (const char data)
 {
   switch (data)
   {
-    case '\0':  // closing byte of a string - will never be displayed in this context!!!
+    case '\0':  // closing byte of a string - will never be displayed in this context!!
       ser.print ("\\0");
     break;
     case '\a':  // 7 bel
@@ -199,7 +237,7 @@ void esp_handle ()
 {
   if ( strstr(espbuf, "ai-thinker.com Version:0.9.2.4") )  // for some reason the esp restarted
     esp_rst=1;
-  if ( (strncmp (espbuf, "ready\r\n", 7)==0 || (strncmp (espbuf, "Ready\r\n", 7)==0))  && esp_rst==1)                    // restart complete
+  if (esp_rst==1 && (strncmp (espbuf, "ready\r\n", 7)==0 || (strncmp (espbuf, "Ready\r\n", 7)==0)) )                    // restart complete
   {
     ser.println (F("**************************************************************************************"));
     ser.println (F("**************************************************************************************"));
@@ -208,6 +246,7 @@ void esp_handle ()
     ser.println (F("**************************************************************************************"));
 
     esp_restart_num++;
+    last_esp_restart=millis();
     ser_stats ();
 
     esp_rst=0;
@@ -222,7 +261,7 @@ void setup ()
 {
   printf_begin();
 
-  esp.begin(57600);  // older firmware has different baud rate
+  esp.begin(57600);  // older firmware 115200baud, newer has standard 9600, this can be changed to make the server more responsive
   ser.begin(57600);
   ser.println (F("esp8266_experiments - auto starting the server"));
 
@@ -235,15 +274,10 @@ void loop ()
   esp_listen ();
   if (esp_msg)
   {
-    server_handle (); // scan the incoming messages
-    esp_handle ();    // checks if the esp restarted - resets esp_msg to 0
+    server_handle ();   // scan the incoming messages
+    esp_handle ();      // checks if the esp restarted - resets esp_msg to 0
   }
-  server_loop ();     // handle webpage requests
-  if (serverup==0)      // server not running?
-  {
-    delay(1000);
-    server_start ();  // restart the server
-  }
+  server_loop ();       // handle webpage requests - check if server is running and start/restart if necessary
 }
 
 
